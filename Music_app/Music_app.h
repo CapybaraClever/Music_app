@@ -24,42 +24,38 @@ protected:
 
 private slots:
 
-    void onNewFile();     
-    void onOpenFile();     
-    void onSaveFile();    
-    void onSaveFileAs();    
+    void onNewFile();
+    void onOpenFile();
+    void onSaveFile();
+    void onSaveFileAs();
 
-    void onAddSong();      
-    void onDeleteSong();  
+    void onAddSong();
+    void onDeleteSong();
 
-    void onSongInfo();                      
-    void onRowDoubleClicked(int row, int col); // двойной клик - показ инфы
+    void onSongInfo();
+    void onRowDoubleClicked(int row, int col);
 
-    void onFindOldest();   
-    void onSortAscending();  
+    void onFindOldest();
+    void onSortAscending();
     void onSortDescending();
 
     void onAbout();
 
 private:
-    // инизиализируем UI
     void setupUi();
     void setupMenuBar();
     void setupToolBar();
     void setupStatusBar();
     void connectSignals();
-    
-    //это для логики таблицы
+
     void refreshTable();
     void populateRow(int row, const Song& s);
-    int  selectedRow() const;  
+    int  selectedRow() const;
     void selectRow(int row);
     void setModified(bool flag);
 
     bool saveToFile(const QString& path);
     bool loadFromFile(const QString& path);
-
-   
     bool doSave(bool forceDialog);
 
     QVector<Song>  m_songs;
@@ -80,9 +76,9 @@ private:
     QAction* m_actSortDesc;
     QAction* m_actAbout;
 
-    //сигнатуры для защиты файла .msa от чтения других/битых файлов. Можно убрать, это одно из доппппп фичей
     static constexpr quint32 FILE_MAGIC = 0x4D534100;
-    static constexpr quint32 FILE_VERSION = 1;
+    // Увеличили версию до 2, так как добавили новые данные в заголовок
+    static constexpr quint32 FILE_VERSION = 2;
 };
 
 #endif

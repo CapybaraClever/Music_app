@@ -24,10 +24,10 @@ private slots:
     void onAccept();
 
 private:
-    QLineEdit* m_titleEdit;   
-    QLineEdit* m_authorEdit; 
-    QSpinBox* m_yearSpin;    
-    QDialogButtonBox* m_buttons;   
+    QLineEdit* m_titleEdit;
+    QLineEdit* m_authorEdit;
+    QSpinBox* m_yearSpin;
+    QDialogButtonBox* m_buttons;
 };
 
 #endif

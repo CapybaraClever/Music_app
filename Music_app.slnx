@@ -2,5 +2,5 @@
   <Configurations>
     <Platform Name="x64" />
   </Configurations>
-  <Project Path="Music_app/Music_app.vcxproj" />
+  <Project Path="Music_app/Music_app.vcxproj" Id="fd9d1881-f5f4-47b0-a709-e3d19a9b67d0" />
 </Solution>

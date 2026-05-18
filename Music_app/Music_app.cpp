@@ -16,6 +16,7 @@
 #include <QFileInfo>
 #include <QCloseEvent>
 #include <QPushButton>
+#include <QByteArray>
 #include <algorithm>
 
 Music_app::Music_app(QWidget* parent)
@@ -43,7 +44,6 @@ void Music_app::setupUi()
 
     m_table = new QTableWidget(0, 3, this);
     m_table->setHorizontalHeaderLabels({ tr("Название"), tr("Автор"), tr("Год") });
-    //делаем поведение колонок, чтобы название и автор тянулись на всё окно, а год поджимается под размер введенных нами цифр
     m_table->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
     m_table->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
     m_table->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
@@ -53,11 +53,10 @@ void Music_app::setupUi()
     m_table->setAlternatingRowColors(true);
     m_table->verticalHeader()->setVisible(false);
     m_table->setSortingEnabled(false);
-    
+
     auto* btnAdd = new QPushButton(tr("Добавить"), this);
     auto* btnDelete = new QPushButton(tr("Удалить"), this);
     auto* btnInfo = new QPushButton(tr("Инфо"), this);
-
     auto* btnOldest = new QPushButton(tr("Найти старейшую"), this);
 
     connect(btnAdd, &QPushButton::clicked, this, &Music_app::onAddSong);
@@ -70,7 +69,7 @@ void Music_app::setupUi()
     btnLayout->addWidget(btnAdd);
     btnLayout->addWidget(btnDelete);
     btnLayout->addWidget(btnInfo);
-    btnLayout->addStretch();         
+    btnLayout->addStretch();
     btnLayout->addWidget(btnOldest);
 
     auto* mainLayout = new QVBoxLayout(central);
@@ -163,7 +162,6 @@ void Music_app::populateRow(int row, const Song& s)
 
 int Music_app::selectedRow() const
 {
-    //currentRow() НЕ МЕНЯТЬ!!! иначе все упадет в момент, когда человеек тыкнет в пустую область таблицы
     return m_table->currentRow();
 }
 
@@ -193,16 +191,40 @@ bool Music_app::saveToFile(const QString& path)
         return false;
     }
 
+    // 1. Сначала записываем сами данные (песни) во временный байтовый буфер
+    QByteArray payload;
+    QDataStream payloadStream(&payload, QIODevice::WriteOnly);
+    payloadStream.setVersion(QDataStream::Qt_6_0);
+    for (const Song& s : m_songs) {
+        payloadStream << s;
+    }
+
+    // 2. Считаем количество единиц и нулей в этом буфере (битовый анализ)
+    quint64 onesCount = 0;
+    for (char b : payload) {
+        quint8 byte = static_cast<quint8>(b);
+        for (int i = 0; i < 8; ++i) {
+            if (byte & (1 << i)) {
+                onesCount++;
+            }
+        }
+    }
+    // Всего битов минус единицы = нули
+    quint64 zerosCount = (static_cast<quint64>(payload.size()) * 8) - onesCount;
+
+    // 3. Открываем основной поток для записи в файл
     QDataStream out(&file);
     out.setVersion(QDataStream::Qt_6_0);
 
+    // Записываем заголовок
     out << FILE_MAGIC
         << FILE_VERSION
-        << static_cast<qint32>(m_songs.size());
+        << static_cast<qint32>(m_songs.size())
+        << zerosCount  // Записываем нули
+        << onesCount;  // Записываем единицы
 
-    // последовательная запись всех проектов song
-    for (const Song& s : m_songs)
-        out << s;
+    // 4. Записываем сам буфер с данными после заголовка
+    file.write(payload);
 
     file.close();
     return true;
@@ -222,31 +244,68 @@ bool Music_app::loadFromFile(const QString& path)
 
     quint32 magic = 0, version = 0;
     qint32  count = 0;
+
+    // Читаем начало заголовка
     in >> magic >> version >> count;
 
     if (in.status() != QDataStream::Ok || magic != FILE_MAGIC) {
         QMessageBox::warning(this, tr("Неверный формат"),
-            tr("Файл повреждён или имеет неверный формат."));
+            tr("Файл не является архивом MSA или повреждён."));
         return false;
     }
-    if (version > FILE_VERSION) {
-        QMessageBox::warning(this, tr("Несовместимая версия"),
-            tr("Файл создан более новой версией программы (версия %1).")
-            .arg(version));
+
+    // Жестко проверяем версию, чтобы не открывать старые файлы без битов
+    if (version < FILE_VERSION) {
+        QMessageBox::warning(this, tr("Старая версия"),
+            tr("Файл сохранен в старом формате без проверки целостности. Открытие отклонено."));
         return false;
     }
+
+    quint64 expectedZeros = 0;
+    quint64 expectedOnes = 0;
+
+    // Читаем ожидаемые биты из файла
+    in >> expectedZeros >> expectedOnes;
+
     if (count < 0 || count > 100000) {
         QMessageBox::warning(this, tr("Ошибка формата"),
-            tr("Некорректное количество записей в файле: %1").arg(count));
+            tr("Некорректное количество записей в файле."));
         return false;
     }
+
+    // Читаем весь остаток файла (нашу полезную нагрузку)
+    QByteArray payload = file.readAll();
+
+    // Считаем реальные биты в прочитанных данных
+    quint64 actualOnes = 0;
+    for (char b : payload) {
+        quint8 byte = static_cast<quint8>(b);
+        for (int i = 0; i < 8; ++i) {
+            if (byte & (1 << i)) {
+                actualOnes++;
+            }
+        }
+    }
+    quint64 actualZeros = (static_cast<quint64>(payload.size()) * 8) - actualOnes;
+
+    // СВЕРЯЕМ! Если не сходится - ругаемся и выходим
+    if (actualZeros != expectedZeros || actualOnes != expectedOnes) {
+        QMessageBox::critical(this, tr("Нарушение целостности"),
+            tr("Код файла был изменен или поврежден!\n"
+                "Количество битов не совпадает с оригинальным."));
+        return false;
+    }
+
+    // Если всё сошлось, переводим буфер обратно в объекты песен
+    QDataStream payloadStream(&payload, QIODevice::ReadOnly);
+    payloadStream.setVersion(QDataStream::Qt_6_0);
 
     QVector<Song> songs;
     songs.reserve(count);
     for (qint32 i = 0; i < count; ++i) {
         Song s;
-        in >> s;
-        if (in.status() != QDataStream::Ok) {
+        payloadStream >> s;
+        if (payloadStream.status() != QDataStream::Ok) {
             QMessageBox::warning(this, tr("Ошибка чтения"),
                 tr("Файл повреждён: сбой при чтении записи %1.").arg(i + 1));
             return false;
@@ -272,7 +331,7 @@ bool Music_app::doSave(bool forceDialog)
             tr("Музыкальный архив (*.msa);;Все файлы (*)"));
 
         if (path.isEmpty())
-            return false; // пользователь нажал отмену
+            return false;
 
         if (!path.endsWith(QLatin1String(".msa"), Qt::CaseInsensitive))
             path += QLatin1String(".msa");
@@ -311,7 +370,7 @@ void Music_app::onNewFile()
 
 void Music_app::onOpenFile()
 {
-     if (m_modified) {
+    if (m_modified) {
         QMessageBox msgBox(this);
         msgBox.setWindowTitle(tr("Открытие файла"));
         msgBox.setText(tr("В архиве есть несохранённые изменения."));
@@ -343,7 +402,7 @@ void Music_app::onOpenFile()
 
 void Music_app::onSaveFile()
 {
-   doSave(false);
+    doSave(false);
 }
 
 void Music_app::onSaveFileAs()
@@ -482,11 +541,9 @@ void Music_app::onAbout()
     QMessageBox msgBox(this);
     msgBox.setWindowTitle(tr("О программе"));
     msgBox.setIcon(QMessageBox::NoIcon);
-
     msgBox.setText(tr("<h2>Музыкальный архив</h2>"));
-
     msgBox.setInformativeText(
-        tr("<p>Версия 1.0</p>"
+        tr("<p>Версия 1.1 (Защищённая)</p>"
             "<p>Разработчик: один грустный и бедный студентик</p>"
             "<p>Заказчик: очень умный преподаватель</p>"
             "<p><i>P.s.: спасибо, что нажали на эту кнопочку!</i></p>"));
@@ -505,7 +562,6 @@ void Music_app::closeEvent(QCloseEvent* event)
         event->accept();
         return;
     }
-    // QMessageBox не менять, он гарантирует, что кнопки всегда будут на русском языке (я хотела все руссифицировать ахахах)
     QMessageBox msgBox(this);
     msgBox.setWindowTitle(tr("Выход"));
     msgBox.setText(tr("В архиве есть несохранённые изменения."));

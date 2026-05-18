@@ -7,9 +7,9 @@
 // структура вынесена СПЕЦИАЛЬНО отдельно для удобства сериализации :)
 struct Song
 {
-    QString title;   
-    QString author; 
-    int     year;   
+    QString title;
+    QString author;
+    int     year;
 
     Song() : year(2000) {}
 
@@ -31,4 +31,3 @@ inline QDataStream& operator>>(QDataStream& in, Song& s)
 }
 
 #endif 
-
